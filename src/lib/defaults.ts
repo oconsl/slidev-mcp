@@ -137,6 +137,9 @@ export const DEFAULT_TRANSITION = "fade";
 export const DEFAULT_GLOBAL_STYLE_CSS = `@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
 
 :root {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
   --color-bg:       #0d0d0f;
   --color-surface:  #16161a;
   --color-border:   #2a2a35;
@@ -152,44 +155,38 @@ export const DEFAULT_GLOBAL_STYLE_CSS = `@import url('https://fonts.googleapis.c
 
 /* ── Base layout ────────────────────────────────────────────────────── */
 .slidev-layout {
+  font-family: var(--font-sans) !important;
   background: var(--color-bg);
   color: var(--color-text);
-  font-family: 'Inter', sans-serif;
 }
 
 /* ── Headings ───────────────────────────────────────────────────────── */
 h1 {
-  font-size: 2.4rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  background: linear-gradient(135deg, #ffffff, var(--color-accent));
+  font-size: 2.4rem !important;
+  font-weight: 800 !important;
+  letter-spacing: -0.03em !important;
+  line-height: 1.15 !important;
+  background: linear-gradient(135deg, #ffffff 40%, var(--color-accent) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
 h2 {
-  font-size: 1.4rem;
-  font-weight: 500;
-  color: var(--color-text-dim);
+  font-size: 1.4rem !important;
+  font-weight: 500 !important;
+  color: var(--color-text-dim) !important;
+  letter-spacing: -0.01em !important;
+  -webkit-text-fill-color: var(--color-text-dim);
 }
 
 h3 {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--color-accent);
+  font-size: 1rem !important;
+  font-weight: 600 !important;
+  color: var(--color-accent) !important;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-/* Special layout heading overrides */
-.section h1 {
-  font-size: 3rem;
-}
-
-.cover h1 {
-  font-size: 3.2rem;
-  text-shadow: 0 0 40px rgba(124, 106, 247, 0.4);
+  letter-spacing: 0.08em !important;
+  -webkit-text-fill-color: var(--color-accent);
 }
 
 /* ── Body text ──────────────────────────────────────────────────────── */
@@ -205,28 +202,21 @@ strong {
 }
 
 /* ── Code ───────────────────────────────────────────────────────────── */
-pre, .slidev-code {
+pre, code {
+  font-family: var(--font-mono) !important;
   background: #111118 !important;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  font-size: 0.78rem;
-  font-family: 'JetBrains Mono', monospace;
+  border: 1px solid var(--color-border) !important;
+  border-radius: 8px !important;
+  font-size: 0.78rem !important;
 }
 
-code {
-  background: rgba(124, 106, 247, 0.12);
-  color: var(--color-accent);
-  padding: 1px 6px;
-  border-radius: 4px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 0.85em;
-}
-
-pre code {
-  background: transparent;
-  color: inherit;
-  padding: 0;
-  border-radius: 0;
+code:not(pre code) {
+  background: rgba(124, 106, 247, 0.12) !important;
+  color: var(--color-accent) !important;
+  padding: 1px 6px !important;
+  border-radius: 4px !important;
+  border: 1px solid rgba(124, 106, 247, 0.2) !important;
+  font-size: 0.85em !important;
 }
 
 /* ── Tables ─────────────────────────────────────────────────────────── */
@@ -237,26 +227,24 @@ table {
 }
 
 th {
-  background: rgba(124, 106, 247, 0.15);
-  color: var(--color-text);
-  font-weight: 600;
+  background: rgba(124, 106, 247, 0.1);
+  color: var(--color-accent);
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
   padding: 8px 12px;
-  text-align: left;
   border-bottom: 1px solid var(--color-border);
 }
 
 td {
-  padding: 7px 12px;
-  border-bottom: 1px solid var(--color-border);
+  padding: 8px 12px;
+  border-bottom: 1px solid rgba(42, 42, 53, 0.6);
   color: var(--color-text-dim);
 }
 
-tr:last-child td {
-  border-bottom: none;
-}
-
 tr:hover td {
-  background: rgba(124, 106, 247, 0.05);
+  background: rgba(124, 106, 247, 0.04);
+  color: var(--color-text);
 }
 
 /* ── Links ──────────────────────────────────────────────────────────── */
@@ -269,6 +257,60 @@ a:hover {
   text-decoration: underline;
 }
 
+/* ── Blockquote ─────────────────────────────────────────────────────── */
+blockquote {
+  border-left: 3px solid var(--color-accent) !important;
+  background: rgba(124, 106, 247, 0.06) !important;
+  padding: 12px 20px !important;
+  border-radius: 0 8px 8px 0 !important;
+  font-style: italic;
+  color: var(--color-text-dim) !important;
+}
+
+/* ── Section layout ─────────────────────────────────────────────────── */
+.slidev-layout.section {
+  background: var(--color-bg);
+  position: relative;
+  overflow: hidden;
+}
+
+.slidev-layout.section::before {
+  content: '';
+  position: absolute;
+  top: -120px;
+  left: -80px;
+  width: 500px;
+  height: 500px;
+  background: radial-gradient(circle, rgba(124,106,247,0.08) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.slidev-layout.section::after {
+  content: '';
+  position: absolute;
+  bottom: -80px;
+  right: -60px;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(79,209,197,0.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.slidev-layout.section h1 {
+  font-size: 3rem !important;
+}
+
+/* ── Cover layout ───────────────────────────────────────────────────── */
+.slidev-layout.cover h1 {
+  font-size: 3.2rem !important;
+  text-shadow: 0 0 60px rgba(124,106,247,0.4);
+}
+
+/* ── Center layout ──────────────────────────────────────────────────── */
+.slidev-layout.center {
+  background: var(--color-bg);
+}
+
 /* ── Cards / highlight boxes ─────────────────────────────────────────── */
 .card {
   background: var(--color-surface);
@@ -277,26 +319,15 @@ a:hover {
   padding: 1rem 1.25rem;
 }
 
-.card-accent {
-  border-left: 3px solid var(--color-accent);
-}
+.card-accent { border-left: 3px solid var(--color-accent); }
+.card-teal   { border-left: 3px solid var(--color-accent2); }
+.card-amber  { border-left: 3px solid var(--color-accent3); }
 
-.card-teal {
-  border-left: 3px solid var(--color-accent2);
-}
-
-.card-amber {
-  border-left: 3px solid var(--color-accent3);
-}
-
-/* ── Blockquote ─────────────────────────────────────────────────────── */
-blockquote {
-  border-left: 3px solid var(--color-accent);
-  margin: 0.5rem 0;
-  padding: 0.4rem 1rem;
-  color: var(--color-text-dim);
+.accent-card {
   background: rgba(124, 106, 247, 0.06);
-  border-radius: 0 6px 6px 0;
+  border: 1px solid rgba(124, 106, 247, 0.2);
+  border-radius: 12px;
+  padding: 16px 20px;
 }
 
 /* ── Mermaid diagrams ────────────────────────────────────────────────── */
@@ -309,6 +340,55 @@ blockquote {
   width: 100%;
   height: auto;
 }
+
+/* ── Table utility variants ──────────────────────────────────────────── */
+
+/* Glosario: prevents term column from wrapping */
+.glosario-table td:first-child,
+.glosario-table th:first-child {
+  white-space: nowrap;
+  width: 9rem;
+}
+
+.glosario-table table {
+  font-size: 0.78rem;
+}
+
+.glosario-table td,
+.glosario-table th {
+  padding: 5px 8px;
+}
+
+/* Compact table: tighter row padding */
+.table-compact td,
+.table-compact th {
+  padding: 5px 10px;
+}
+
+/* Small table: tighter rows + smaller font */
+.table-sm table {
+  font-size: 0.78rem;
+}
+
+.table-sm td,
+.table-sm th {
+  padding: 4px 8px;
+}
+
+.table-sm h3 {
+  margin-top: 0 !important;
+  margin-bottom: 0.25rem !important;
+}
+
+/* ── Smooth transitions ──────────────────────────────────────────────── */
+* {
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+}
+
+/* ── Scrollbar (for code blocks) ─────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 2px; }
 `;
 
 // ── Mermaid init ──────────────────────────────────────────────────────────────
