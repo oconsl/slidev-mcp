@@ -37,8 +37,8 @@ export interface VerificationResult {
  *  1. File must start with `---` (no BOM, no leading whitespace).
  *  2. Global headmatter block must be properly closed with `---`.
  *  3. Global headmatter must be valid YAML.
- *  4. Slide content must NOT contain bare `---` outside code fences
- *     (these are treated as slide separators and break the presentation).
+ *  4. Two consecutive `---` lines anywhere in the file (outside code fences) are
+ *     flagged as errors — they produce corrupt/empty frontmatter blocks in Slidev.
  *  5. Per-slide frontmatter must be valid YAML.
  *  6. Code fences opened inside a slide must be properly closed.
  *  7. Warns about empty slides.
@@ -279,92 +279,57 @@ export function verifySlidesMd(raw: string): VerificationResult {
     });
   }
 
-  // ── Check for bare `---` inside slide content (the main ask) ───────────────
-  // We re-scan looking for lines that are exactly `---` outside fences
-  // but occur within slide content (not as slide separators or frontmatter delimiters).
-  // The above loop already handles them correctly as slide separators,
-  // but we want to report them as warnings when they appear in a context where
-  // the author likely intended a visual horizontal rule (markdown HR) rather than
-  // a slide separator — i.e., slides where there's already content before the `---`.
-  // NOTE: This is already detected implicitly by the main loop above (they create
-  // unexpected new slides). We add one extra pass to give a clear error message
-  // pointing authors to the exact offending lines.
+  // ── Explicit check: two consecutive `---` lines ─────────────────────────────
+  // Two adjacent `---` lines corrupt Slidev frontmatter parsing — Slidev sees
+  // an empty frontmatter block which breaks the slide that follows.
+  // This scan is independent of the slide-structure loop above and catches the
+  // pattern anywhere in the file (headmatter, slide body, slide frontmatter, etc.),
+  // except inside code fences where `---` is plain text.
   {
     let scanInFence = false;
     let scanFenceChar = "";
-    let scanInHeadmatter = false;
-    let scanInSlideFm = false;
-    let scanHasContent = false;
-    let scanSlideNum = 1;
-    const separatorLineNumbers: number[] = [];
-
-    if (lines[0]?.trim() === "---") {
-      scanInHeadmatter = true;
-    }
+    let prevWasSeparator = false;
+    let prevSeparatorLine = -1;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const trimmed = line.trim();
 
-      // Inside headmatter
-      if (scanInHeadmatter) {
-        if (i > 0 && trimmed === "---") {
-          scanInHeadmatter = false;
-        }
-        continue;
-      }
-
-      // Inside per-slide frontmatter
-      if (scanInSlideFm) {
-        if (trimmed === "---") {
-          scanInSlideFm = false;
-        }
-        continue;
-      }
-
-      // Inside code fence
       if (scanInFence) {
         if (trimmed.startsWith(scanFenceChar)) {
           scanInFence = false;
           scanFenceChar = "";
         }
+        prevWasSeparator = false;
         continue;
       }
 
-      // Open code fence
       if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
         scanInFence = true;
         scanFenceChar = trimmed.startsWith("```") ? "```" : "~~~";
-        scanHasContent = true;
+        prevWasSeparator = false;
         continue;
       }
 
-      // Separator line
       if (trimmed === "---") {
-        if (!scanHasContent) {
-          // Start of per-slide frontmatter
-          scanInSlideFm = true;
-        } else {
-          // This --- appears AFTER content — it's acting as a slide separator.
-          // This is VALID Slidev syntax. But if a user put it thinking it was
-          // a horizontal rule, it's a trap. We flag it as an informational warning.
-          separatorLineNumbers.push(i + 1);
-          scanSlideNum++;
-          scanHasContent = false;
+        if (prevWasSeparator) {
+          issues.push({
+            severity: "error",
+            code: "CONSECUTIVE_SEPARATORS",
+            location: `line ${i + 1}`,
+            line: prevSeparatorLine,
+            message:
+              `Two consecutive \`---\` lines found at lines ${prevSeparatorLine} and ${i + 1}. ` +
+              `This creates an empty or corrupt frontmatter block and breaks Slidev parsing. ` +
+              `Remove one of the \`---\` lines or add content between them.`,
+          });
         }
-        continue;
-      }
-
-      if (trimmed.length > 0) {
-        scanHasContent = true;
+        prevWasSeparator = true;
+        prevSeparatorLine = i + 1;
+      } else {
+        prevWasSeparator = false;
       }
     }
-
-    // We don't re-add issues for each separator — the slide structure was already
-    // handled above. Instead, we surface only the specific "horizontal rule" trap:
-    // if the presentation has MORE slides than might be expected because `---` inside
-    // a slide's content created unexpected splits, we already captured empty slides
-    // above. The key actionable message is the EMPTY_SLIDE warnings pointing to those lines.
   }
 
   return buildResult(issues);
@@ -402,6 +367,7 @@ export function registerVerifyPresentation(server: McpServer): void {
     [
       "Verifies the syntax of the current Slidev presentation (slides.md).",
       "Detects common issues that break slide rendering:",
+      "  • Two consecutive `---` lines anywhere in the file (corrupt frontmatter).",
       "  • Bare `---` lines inside slide content (outside code fences) that Slidev",
       "    interprets as slide separators instead of horizontal rules.",
       "  • Leading whitespace or BOM before the initial frontmatter (creates ghost slides).",

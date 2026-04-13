@@ -320,7 +320,9 @@ export function serialize(parsed: ParsedPresentation): string {
   const headmatter = parsed.headmatter.trim();
 
   const slideTexts = parsed.slides.map((slide) => {
-    const content = slide.content.trim();
+    // Guard: remove any bare `---` lines from content (outside code fences).
+    // Such lines act as slide separators in Slidev and would corrupt the output.
+    const content = stripBareSeparatorsFromContent(slide.content);
     const fm = slide.frontmatter?.trim();
 
     if (fm && fm.length > 0) {
@@ -347,6 +349,52 @@ export function serialize(parsed: ParsedPresentation): string {
 }
 
 /**
+ * Removes ALL bare `---` lines from slide body content, outside of code fences.
+ *
+ * In Slidev, `---` inside slide content (outside fences) is treated as a slide
+ * separator, not as a markdown horizontal rule. Any such line breaks the
+ * presentation structure. This function sanitizes the content by removing them.
+ *
+ * Lines inside ``` or ~~~ code fences are left untouched.
+ */
+function stripBareSeparatorsFromContent(content: string): string {
+  const lines = content.split("\n");
+  const result: string[] = [];
+  let insideFence = false;
+  let fenceChar = "";
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (insideFence) {
+      result.push(line);
+      if (trimmed.startsWith(fenceChar)) {
+        insideFence = false;
+        fenceChar = "";
+      }
+      continue;
+    }
+
+    // Detect opening fence
+    if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+      insideFence = true;
+      fenceChar = trimmed.startsWith("```") ? "```" : "~~~";
+      result.push(line);
+      continue;
+    }
+
+    // Drop bare --- outside fences — they act as slide separators in Slidev
+    if (trimmed === "---") {
+      continue;
+    }
+
+    result.push(line);
+  }
+
+  return result.join("\n").trim();
+}
+
+/**
  * Parses a raw slide content string (as provided by the user/AI) into a Slide object.
  *
  * Handles two formats:
@@ -354,6 +402,8 @@ export function serialize(parsed: ParsedPresentation): string {
  *   2. With embedded frontmatter: "---\nlayout: cover\n---\n# My Slide"
  *
  * This prevents duplicate `---` separators when content already embeds frontmatter.
+ * Any bare `---` lines in the body (outside code fences) are removed, since they
+ * would be treated as slide separators by Slidev and break the presentation.
  */
 export function parseSlideInput(rawInput: string): Slide {
   const trimmed = rawInput.trimStart();
@@ -372,16 +422,15 @@ export function parseSlideInput(rawInput: string): Slide {
 
     if (closingIdx !== -1) {
       const frontmatter = lines.slice(1, closingIdx).join("\n").trim();
-      const body = lines
-        .slice(closingIdx + 1)
-        .join("\n")
-        .trim();
+      const body = stripBareSeparatorsFromContent(
+        lines.slice(closingIdx + 1).join("\n")
+      );
       return { frontmatter, content: body };
     }
   }
 
-  // No embedded frontmatter — plain content
-  return { content: trimmed.trim() };
+  // No embedded frontmatter — sanitize bare --- from content
+  return { content: stripBareSeparatorsFromContent(trimmed) };
 }
 
 /**
