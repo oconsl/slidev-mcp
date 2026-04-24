@@ -1,112 +1,219 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  slidev-mcp — Interactive MCP installer
-#  Registers slidev-mcp in the config of common AI agents
+#  slidev-mcp - Interactive MCP installer
+#  Registers slidev-mcp in OpenCode, Claude Code, Antigravity, and Codex.
 # =============================================================================
 set -euo pipefail
 
-# ── Colors & Symbols ──────────────────────────────────────────────────────────
-if [ -t 1 ] && command -v tput &>/dev/null && tput colors &>/dev/null 2>&1; then
-  BOLD=$(tput bold);  RESET=$(tput sgr0)
-  RED=$(tput setaf 1); GREEN=$(tput setaf 2); YELLOW=$(tput setaf 3)
-  BLUE=$(tput setaf 4); CYAN=$(tput setaf 6); DIM=$(tput dim)
-else
-  BOLD=""; RESET=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; CYAN=""; DIM=""
-fi
-OK="${GREEN}✔${RESET}"; WARN="${YELLOW}⚠${RESET}"; ERR="${RED}✖${RESET}"; INFO="${CYAN}ℹ${RESET}"
+SERVER_NAME="slidev-mcp"
+NPM_PACKAGE="slidev-mcp"
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# --- Chalk-like colors --------------------------------------------------------
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  RESET=$'\033[0m'
+  BOLD=$'\033[1m'
+  DIM=$'\033[2m'
+  ITALIC=$'\033[3m'
+  RED=$'\033[38;2;255;85;85m'
+  GREEN=$'\033[38;2;80;250;123m'
+  YELLOW=$'\033[38;2;241;250;140m'
+  BLUE=$'\033[38;2;98;114;164m'
+  MAGENTA=$'\033[38;2;255;121;198m'
+  CYAN=$'\033[38;2;139;233;253m'
+  ORANGE=$'\033[38;2;255;184;108m'
+else
+  RESET=""; BOLD=""; DIM=""; ITALIC=""
+  RED=""; GREEN=""; YELLOW=""; BLUE=""; MAGENTA=""; CYAN=""; ORANGE=""
+fi
+
+OK="${GREEN}ok${RESET}"
+WARN="${YELLOW}warn${RESET}"
+ERR="${RED}err${RESET}"
+INFO="${CYAN}info${RESET}"
+
 print_header() {
   echo ""
-  echo "${BOLD}${BLUE}╔══════════════════════════════════════════════════╗${RESET}"
-  echo "${BOLD}${BLUE}║          slidev-mcp  ·  MCP Installer            ║${RESET}"
-  echo "${BOLD}${BLUE}╚══════════════════════════════════════════════════╝${RESET}"
+  echo "  ${BOLD}${MAGENTA}slidev-mcp${RESET} ${DIM}interactive installer${RESET}"
+  echo "  ${DIM}Configure MCP once, then get back to making slides.${RESET}"
   echo ""
 }
 
-print_step() { echo "  ${BOLD}${CYAN}▶${RESET} $1"; }
-print_ok()   { echo "  ${OK}  $1"; }
+print_step() { echo "  ${BOLD}${CYAN}>${RESET} $1"; }
+print_ok() { echo "  ${OK}  $1"; }
 print_warn() { echo "  ${WARN}  ${YELLOW}$1${RESET}"; }
-print_err()  { echo "  ${ERR}  ${RED}$1${RESET}"; }
+print_err() { echo "  ${ERR}  ${RED}$1${RESET}"; }
 print_info() { echo "  ${INFO}  ${DIM}$1${RESET}"; }
 
 confirm() {
   local prompt="${1:-Continue?}"
-  printf "  ${BOLD}%s${RESET} [Y/n] " "$prompt"
+  local reply
+  printf "  ${BOLD}%s${RESET} ${DIM}[Y/n]${RESET} " "$prompt"
   read -r reply
   [[ "${reply:-y}" =~ ^[Yy]$ ]]
 }
 
-require_cmd() {
-  command -v "$1" &>/dev/null || { print_err "Required command not found: $1"; return 1; }
+pause() {
+  echo ""
+  printf "  ${DIM}Press Enter to continue...${RESET} "
+  read -r _
 }
 
-# ── Detect install mode ────────────────────────────────────────────────────────
-# Prefer the built dist if we are inside the cloned repo, otherwise use npx.
+require_python() {
+  if command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="python3"
+  elif command -v python >/dev/null 2>&1; then
+    PYTHON_BIN="python"
+  else
+    print_err "Python is required to update JSON/TOML config files."
+    print_info "Install Python 3, then run this installer again."
+    exit 1
+  fi
+}
+
+run_python() {
+  "$PYTHON_BIN" "$@"
+}
+
+json_array() {
+  run_python - "$@" <<'PY'
+import json
+import sys
+print(json.dumps(sys.argv[1:]))
+PY
+}
+
+shell_join() {
+  printf '%q ' "$@"
+}
+
+# --- Paths and runtime mode ---------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-if [[ -f "$REPO_ROOT/dist/index.js" ]]; then
-  MCP_COMMAND="node"
-  MCP_ARGS="[\"node\", \"$REPO_ROOT/dist/index.js\"]"
-  MCP_ARGS_LIST=("node" "$REPO_ROOT/dist/index.js")
-  MCP_MODE="local (built dist)"
-else
-  MCP_COMMAND="npx"
-  MCP_ARGS="[\"npx\", \"-y\", \"slidev-mcp\"]"
-  MCP_ARGS_LIST=("npx" "-y" "slidev-mcp")
-  MCP_MODE="npx (package registry)"
-fi
+detect_runtime() {
+  if [[ -f "$REPO_ROOT/dist/index.js" ]]; then
+    MCP_MODE="local build"
+    MCP_COMMAND="node"
+    MCP_ARGS=("$REPO_ROOT/dist/index.js")
+    OPENCODE_COMMAND=("node" "$REPO_ROOT/dist/index.js")
+  else
+    MCP_MODE="npm package"
+    MCP_COMMAND="npx"
+    MCP_ARGS=("-y" "$NPM_PACKAGE")
+    OPENCODE_COMMAND=("npx" "-y" "$NPM_PACKAGE")
+  fi
 
-# ── JSON helpers (pure bash, no jq required) ──────────────────────────────────
-# Minimal JSON manipulation using Python (available on all relevant platforms)
-_python() { python3 "$@" 2>/dev/null || python "$@" 2>/dev/null; }
+  MCP_ARGS_JSON="$(json_array "${MCP_ARGS[@]}")"
+  OPENCODE_COMMAND_JSON="$(json_array "${OPENCODE_COMMAND[@]}")"
+}
 
-json_set_mcp_opencode() {
-  # Sets .mcp["slidev-mcp"] = { command: [...], enabled: true, type: "local" }
+read_package_version() {
+  run_python - "$REPO_ROOT/package.json" <<'PY' 2>/dev/null || true
+import json
+import sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as f:
+        print(json.load(f).get("version", "unknown"))
+except Exception:
+    print("unknown")
+PY
+}
+
+latest_npm_version() {
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "unknown"
+    return
+  fi
+  npm view "$NPM_PACKAGE" version --silent </dev/null 2>/dev/null || echo "unknown"
+}
+
+version_status_label() {
+  LOCAL_VERSION="$(read_package_version)"
+  LATEST_VERSION="$(latest_npm_version)"
+
+  if [[ "$LOCAL_VERSION" == "unknown" || "$LATEST_VERSION" == "unknown" ]]; then
+    UPDATE_STATUS="${YELLOW}status unknown${RESET}"
+  elif [[ "$LOCAL_VERSION" == "$LATEST_VERSION" ]]; then
+    UPDATE_STATUS="${GREEN}up to date v$LOCAL_VERSION${RESET}"
+  else
+    UPDATE_STATUS="${ORANGE}update available v$LOCAL_VERSION -> v$LATEST_VERSION${RESET}"
+  fi
+}
+
+check_deps() {
+  require_python
+
+  if ! command -v node >/dev/null 2>&1; then
+    print_warn "Node.js was not found in PATH. slidev-mcp requires Node >= 18."
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    print_warn "npm was not found in PATH. Updates and npx mode may not work."
+  fi
+}
+
+check_build() {
+  if [[ -f "$REPO_ROOT/dist/index.js" ]]; then
+    return
+  fi
+
+  print_warn "dist/index.js was not found, so the installer will use npx."
+  if command -v npm >/dev/null 2>&1 && confirm "Build local dist now?"; then
+    print_step "Running npm run build"
+    if (cd "$REPO_ROOT" && npm run build); then
+      print_ok "Build complete."
+      detect_runtime
+    else
+      print_warn "Build failed. Continuing with npx mode."
+    fi
+  fi
+}
+
+# --- Config writers -----------------------------------------------------------
+write_opencode_config() {
   local file="$1"
-  local args_json="$2"
-  _python - "$file" "$args_json" <<'PYEOF'
-import sys, json, os
+  run_python - "$file" "$OPENCODE_COMMAND_JSON" <<'PY'
+import json
+import os
+import sys
 
-file = sys.argv[1]
-args_json = sys.argv[2]
+path = sys.argv[1]
+command = json.loads(sys.argv[2])
 
 try:
-    with open(file) as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
 except (FileNotFoundError, json.JSONDecodeError):
     data = {}
 
+data.setdefault("$schema", "https://opencode.ai/config.json")
 data.setdefault("mcp", {})
 data["mcp"]["slidev-mcp"] = {
-    "command": json.loads(args_json),
+    "type": "local",
+    "command": command,
     "enabled": True,
-    "type": "local"
 }
 
-with open(file, "w") as f:
+os.makedirs(os.path.dirname(path), exist_ok=True)
+with open(path, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
-
-print("ok")
-PYEOF
+PY
 }
 
-json_set_mcp_generic() {
-  # Sets .mcpServers["slidev-mcp"] = { command, args: [...] }
+write_mcpservers_config() {
   local file="$1"
-  local command="$2"
-  local args_json="$3"   # JSON array of additional args
-  _python - "$file" "$command" "$args_json" <<'PYEOF'
-import sys, json, os
+  run_python - "$file" "$MCP_COMMAND" "$MCP_ARGS_JSON" <<'PY'
+import json
+import os
+import sys
 
-file = sys.argv[1]
+path = sys.argv[1]
 command = sys.argv[2]
 args = json.loads(sys.argv[3])
 
 try:
-    with open(file) as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
 except (FileNotFoundError, json.JSONDecodeError):
     data = {}
@@ -114,324 +221,274 @@ except (FileNotFoundError, json.JSONDecodeError):
 data.setdefault("mcpServers", {})
 data["mcpServers"]["slidev-mcp"] = {
     "command": command,
-    "args": args
+    "args": args,
 }
 
-with open(file, "w") as f:
+os.makedirs(os.path.dirname(path), exist_ok=True)
+with open(path, "w", encoding="utf-8") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
-
-print("ok")
-PYEOF
+PY
 }
 
-# Extract command/args for mcpServers format from MCP_ARGS_LIST
-# MCP_ARGS_LIST = ("npx" "-y" "slidev-mcp") → command="npx", args=["-y","slidev-mcp"]
-#                 ("node" "/path/dist/index.js") → command="node", args=["/path/..."]
-GENERIC_COMMAND="${MCP_ARGS_LIST[0]}"
-GENERIC_ARGS_JSON=$(printf '%s\n' "${MCP_ARGS_LIST[@]:1}" | _python - <<'PYEOF'
-import sys, json
-lines = [l.rstrip('\n') for l in sys.stdin.readlines()]
-print(json.dumps(lines))
-PYEOF
+write_codex_config() {
+  local file="$1"
+  run_python - "$file" "$MCP_COMMAND" "$MCP_ARGS_JSON" <<'PY'
+import json
+import os
+import re
+import sys
+
+path = sys.argv[1]
+command = sys.argv[2]
+args = json.loads(sys.argv[3])
+table = "mcp_servers.slidev-mcp"
+header = f"[{table}]"
+block = "\n".join([
+    header,
+    'command = ' + json.dumps(command),
+    'args = ' + json.dumps(args),
+    'type = "stdio"',
+    "",
+])
+
+try:
+    with open(path, encoding="utf-8") as f:
+        original = f.read()
+except FileNotFoundError:
+    original = ""
+
+pattern = re.compile(
+    r"(?ms)^\[mcp_servers\.slidev-mcp\]\s*.*?(?=^\[[^\]]+\]\s*$|\Z)"
 )
 
-# ── Agent installers ───────────────────────────────────────────────────────────
+if pattern.search(original):
+    updated = pattern.sub(block, original).rstrip() + "\n"
+else:
+    sep = "\n\n" if original.strip() else ""
+    updated = original.rstrip() + sep + block
 
-install_opencode() {
-  print_step "Installing for ${BOLD}Opencode${RESET}"
+os.makedirs(os.path.dirname(path), exist_ok=True)
+with open(path, "w", encoding="utf-8") as f:
+    f.write(updated)
+PY
+}
 
-  # Resolve config file: project-local opencode.json takes precedence,
-  # then ~/.config/opencode/opencode.json (global)
-  local targets=()
-  local scope_choice
+# --- Installers ---------------------------------------------------------------
+choose_scope() {
+  local title="$1"
+  local global_path="$2"
+  local project_path="$3"
+  local choice
 
   echo ""
-  echo "    Select configuration scope for Opencode:"
-  echo "    ${BOLD}1)${RESET} Global  — ~/.config/opencode/opencode.json"
-  echo "    ${BOLD}2)${RESET} Project — ./opencode.json (current directory)"
+  echo "    ${BOLD}$title scope${RESET}"
+  echo "    ${BOLD}1)${RESET} Global   ${DIM}$global_path${RESET}"
+  echo "    ${BOLD}2)${RESET} Project  ${DIM}$project_path${RESET}"
   echo "    ${BOLD}3)${RESET} Both"
-  printf "    Choice [1]: "
-  read -r scope_choice
-  scope_choice="${scope_choice:-1}"
+  printf "    Choice ${DIM}[1]${RESET}: "
+  read -r choice
+  choice="${choice:-1}"
 
-  case "$scope_choice" in
-    1) targets=("$HOME/.config/opencode/opencode.json") ;;
-    2) targets=("$(pwd)/opencode.json") ;;
-    3) targets=("$HOME/.config/opencode/opencode.json" "$(pwd)/opencode.json") ;;
-    *) print_warn "Invalid choice, defaulting to global."; targets=("$HOME/.config/opencode/opencode.json") ;;
+  case "$choice" in
+    1) SELECTED_TARGETS=("$global_path") ;;
+    2) SELECTED_TARGETS=("$project_path") ;;
+    3) SELECTED_TARGETS=("$global_path" "$project_path") ;;
+    *) print_warn "Invalid choice. Using global scope."; SELECTED_TARGETS=("$global_path") ;;
   esac
+}
 
-  for cfg in "${targets[@]}"; do
-    mkdir -p "$(dirname "$cfg")"
-    local result
-    result=$(json_set_mcp_opencode "$cfg" "$MCP_ARGS" 2>&1) || true
-    if [[ "$result" == "ok" ]]; then
+install_opencode() {
+  print_step "Configuring ${BOLD}OpenCode${RESET}"
+  choose_scope "OpenCode" "$HOME/.config/opencode/opencode.json" "$(pwd)/opencode.json"
+
+  for cfg in "${SELECTED_TARGETS[@]}"; do
+    if write_opencode_config "$cfg"; then
       print_ok "Registered in ${BOLD}$cfg${RESET}"
     else
-      print_err "Failed to write $cfg: $result"
+      print_err "Could not write $cfg"
     fi
   done
 }
 
 install_claude_code() {
-  print_step "Installing for ${BOLD}Claude Code${RESET} (claude CLI)"
+  print_step "Configuring ${BOLD}Claude Code${RESET}"
 
-  if ! command -v claude &>/dev/null; then
-    print_warn "claude CLI not found in PATH. Skipping automatic registration."
-    print_info "Install Claude Code: https://docs.anthropic.com/en/docs/claude-code"
-    print_info "Then run manually:"
-    if [[ "${MCP_ARGS_LIST[0]}" == "npx" ]]; then
-      print_info "  claude mcp add slidev-mcp -- npx -y slidev-mcp"
-    else
-      print_info "  claude mcp add slidev-mcp -- node $REPO_ROOT/dist/index.js"
-    fi
+  if ! command -v claude >/dev/null 2>&1; then
+    print_warn "claude CLI was not found in PATH."
+    print_info "Manual command:"
+    print_info "claude mcp add --scope user $SERVER_NAME -- $(shell_join "$MCP_COMMAND" "${MCP_ARGS[@]}")"
     return
   fi
 
+  local choice scope_flag
   echo ""
-  echo "    Select configuration scope for Claude Code:"
-  echo "    ${BOLD}1)${RESET} User   (global, all projects)"
-  echo "    ${BOLD}2)${RESET} Local  (current machine, all projects)"
-  echo "    ${BOLD}3)${RESET} Project (.mcp.json in current directory)"
-  printf "    Choice [1]: "
-  read -r scope_choice
-  scope_choice="${scope_choice:-1}"
+  echo "    ${BOLD}Claude Code scope${RESET}"
+  echo "    ${BOLD}1)${RESET} User     ${DIM}global, all projects${RESET}"
+  echo "    ${BOLD}2)${RESET} Local    ${DIM}this machine${RESET}"
+  echo "    ${BOLD}3)${RESET} Project  ${DIM}.mcp.json in current directory${RESET}"
+  printf "    Choice ${DIM}[1]${RESET}: "
+  read -r choice
+  choice="${choice:-1}"
 
-  local scope_flag
-  case "$scope_choice" in
+  case "$choice" in
     1) scope_flag="--scope user" ;;
     2) scope_flag="--scope local" ;;
     3) scope_flag="--scope project" ;;
-    *) print_warn "Invalid, defaulting to user."; scope_flag="--scope user" ;;
+    *) print_warn "Invalid choice. Using user scope."; scope_flag="--scope user" ;;
   esac
 
-  # Build the command array for claude mcp add
-  local cmd_args=()
-  if [[ "${MCP_ARGS_LIST[0]}" == "npx" ]]; then
-    cmd_args=("npx" "-y" "slidev-mcp")
-  else
-    cmd_args=("node" "$REPO_ROOT/dist/index.js")
-  fi
+  claude mcp remove "$SERVER_NAME" $scope_flag >/dev/null 2>&1 || true
 
-  # Remove existing entry silently to avoid duplicate errors
-  claude mcp remove slidev-mcp $scope_flag 2>/dev/null || true
-
-  if claude mcp add $scope_flag slidev-mcp -- "${cmd_args[@]}" 2>&1; then
-    print_ok "Registered via claude CLI ($scope_flag)"
+  if claude mcp add $scope_flag "$SERVER_NAME" -- "$MCP_COMMAND" "${MCP_ARGS[@]}"; then
+    print_ok "Registered via claude CLI (${scope_flag})."
   else
-    print_err "claude mcp add failed. Try manually:"
-    print_info "  claude mcp add $scope_flag slidev-mcp -- ${cmd_args[*]}"
+    print_err "claude mcp add failed."
+    print_info "Manual command:"
+    print_info "claude mcp add $scope_flag $SERVER_NAME -- $(shell_join "$MCP_COMMAND" "${MCP_ARGS[@]}")"
   fi
 }
 
-install_cursor() {
-  print_step "Installing for ${BOLD}Cursor${RESET}"
+antigravity_config_path() {
+  echo "$HOME/.gemini/antigravity/mcp_config.json"
+}
 
-  # Cursor uses ~/.cursor/mcp.json (global) or .cursor/mcp.json (project)
-  echo ""
-  echo "    Select configuration scope for Cursor:"
-  echo "    ${BOLD}1)${RESET} Global  — ~/.cursor/mcp.json"
-  echo "    ${BOLD}2)${RESET} Project — .cursor/mcp.json (current directory)"
-  printf "    Choice [1]: "
-  read -r scope_choice
-  scope_choice="${scope_choice:-1}"
-
+install_antigravity() {
+  print_step "Configuring ${BOLD}Antigravity${RESET}"
   local cfg
-  case "$scope_choice" in
-    1) cfg="$HOME/.cursor/mcp.json" ;;
-    2) cfg="$(pwd)/.cursor/mcp.json" ;;
-    *) print_warn "Invalid, defaulting to global."; cfg="$HOME/.cursor/mcp.json" ;;
-  esac
+  cfg="$(antigravity_config_path)"
 
-  mkdir -p "$(dirname "$cfg")"
-  local result
-  result=$(json_set_mcp_generic "$cfg" "$GENERIC_COMMAND" "$GENERIC_ARGS_JSON" 2>&1) || true
-  if [[ "$result" == "ok" ]]; then
+  if write_mcpservers_config "$cfg"; then
     print_ok "Registered in ${BOLD}$cfg${RESET}"
-    print_info "Restart Cursor to load the new MCP server."
+    print_info "In Antigravity, refresh MCP servers if the tool list does not update."
   else
-    print_err "Failed to write $cfg: $result"
+    print_err "Could not write $cfg"
   fi
 }
 
-install_windsurf() {
-  print_step "Installing for ${BOLD}Windsurf${RESET}"
+install_codex() {
+  print_step "Configuring ${BOLD}Codex${RESET}"
+  choose_scope "Codex" "${CODEX_HOME:-$HOME/.codex}/config.toml" "$(pwd)/.codex/config.toml"
 
-  # Windsurf uses ~/.codeium/windsurf/mcp_config.json (global)
-  local cfg="$HOME/.codeium/windsurf/mcp_config.json"
-
-  mkdir -p "$(dirname "$cfg")"
-  local result
-  result=$(json_set_mcp_generic "$cfg" "$GENERIC_COMMAND" "$GENERIC_ARGS_JSON" 2>&1) || true
-  if [[ "$result" == "ok" ]]; then
-    print_ok "Registered in ${BOLD}$cfg${RESET}"
-    print_info "Restart Windsurf and reload MCP servers from Settings → MCP."
-  else
-    print_err "Failed to write $cfg: $result"
-  fi
+  for cfg in "${SELECTED_TARGETS[@]}"; do
+    if write_codex_config "$cfg"; then
+      print_ok "Registered in ${BOLD}$cfg${RESET}"
+    else
+      print_err "Could not write $cfg"
+    fi
+  done
 }
 
-install_claude_desktop() {
-  print_step "Installing for ${BOLD}Claude Desktop${RESET}"
+# --- Update ------------------------------------------------------------------
+update_project() {
+  print_step "Updating ${BOLD}slidev-mcp${RESET}"
 
-  local cfg
-  case "$OSTYPE" in
-    darwin*) cfg="$HOME/Library/Application Support/Claude/claude_desktop_config.json" ;;
-    msys*|cygwin*|win32*) cfg="$APPDATA/Claude/claude_desktop_config.json" ;;
-    *) cfg="$HOME/.config/Claude/claude_desktop_config.json" ;;
-  esac
-
-  mkdir -p "$(dirname "$cfg")"
-  local result
-  result=$(json_set_mcp_generic "$cfg" "$GENERIC_COMMAND" "$GENERIC_ARGS_JSON" 2>&1) || true
-  if [[ "$result" == "ok" ]]; then
-    print_ok "Registered in ${BOLD}$cfg${RESET}"
-    print_info "Restart Claude Desktop to load the new MCP server."
-  else
-    print_err "Failed to write $cfg: $result"
-  fi
-}
-
-install_zed() {
-  print_step "Installing for ${BOLD}Zed${RESET}"
-
-  # Zed uses settings.json with "context_servers" key
-  local cfg="$HOME/.config/zed/settings.json"
-
-  if ! _python - "$cfg" "$GENERIC_COMMAND" "$GENERIC_ARGS_JSON" <<'PYEOF'
-import sys, json, os
-
-file = sys.argv[1]
-command = sys.argv[2]
-args = json.loads(sys.argv[3])
-
-try:
-    with open(file) as f:
-        data = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    data = {}
-
-data.setdefault("context_servers", {})
-data["context_servers"]["slidev-mcp"] = {
-    "command": {
-        "path": command,
-        "args": args
-    },
-    "settings": {}
-}
-
-os.makedirs(os.path.dirname(file), exist_ok=True)
-with open(file, "w") as f:
-    json.dump(data, f, indent=2)
-    f.write("\n")
-print("ok")
-PYEOF
-  then
-    print_err "Failed to write Zed config."
+  if ! command -v git >/dev/null 2>&1; then
+    print_err "git was not found in PATH."
     return
   fi
-  print_ok "Registered in ${BOLD}$cfg${RESET}"
-  print_info "Reload Zed settings (cmd+shift+p → 'zed: reload configuration')."
+
+  if ! git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    print_warn "This installer is not running inside a git checkout."
+    print_info "Use npm/npx mode, or update the source manually."
+    return
+  fi
+
+  if ! command -v npm >/dev/null 2>&1; then
+    print_err "npm is required to install dependencies and rebuild."
+    return
+  fi
+
+  if [[ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]]; then
+    print_warn "The repository has uncommitted changes."
+    if ! confirm "Continue with git pull --ff-only anyway?"; then
+      print_info "Update cancelled."
+      return
+    fi
+  fi
+
+  print_step "Pulling latest source"
+  git -C "$REPO_ROOT" pull --ff-only
+
+  print_step "Installing dependencies"
+  (cd "$REPO_ROOT" && npm install)
+
+  print_step "Building dist"
+  (cd "$REPO_ROOT" && npm run build)
+
+  detect_runtime
+  version_status_label
+  print_ok "Update complete. Current status: $UPDATE_STATUS"
 }
 
-# ── Agent menu ─────────────────────────────────────────────────────────────────
+# --- Menu ---------------------------------------------------------------------
+show_status_card() {
+  echo "  ${BOLD}Runtime${RESET}"
+  echo "    mode:    ${CYAN}$MCP_MODE${RESET}"
+  echo "    command: ${DIM}$(shell_join "$MCP_COMMAND" "${MCP_ARGS[@]}")${RESET}"
+  echo "    version: $UPDATE_STATUS"
+  echo ""
+}
+
 show_menu() {
+  echo "  ${BOLD}Choose what to configure${RESET}"
   echo ""
-  echo "  ${BOLD}Select agents to configure:${RESET}"
+  echo "    ${BOLD}${CYAN}1)${RESET} OpenCode"
+  echo "    ${BOLD}${CYAN}2)${RESET} Claude Code"
+  echo "    ${BOLD}${CYAN}3)${RESET} Antigravity"
+  echo "    ${BOLD}${CYAN}4)${RESET} Codex"
+  echo "    ${BOLD}${MAGENTA}a)${RESET} All four"
+  echo "    ${BOLD}${ORANGE}u)${RESET} Update slidev-mcp ${DIM}[$UPDATE_STATUS${DIM}]${RESET}"
+  echo "    ${BOLD}q)${RESET} Quit"
   echo ""
-  echo "    ${BOLD}1)${RESET}  Opencode"
-  echo "    ${BOLD}2)${RESET}  Claude Code  (claude CLI)"
-  echo "    ${BOLD}3)${RESET}  Cursor"
-  echo "    ${BOLD}4)${RESET}  Windsurf"
-  echo "    ${BOLD}5)${RESET}  Claude Desktop"
-  echo "    ${BOLD}6)${RESET}  Zed"
-  echo "    ${BOLD}a)${RESET}  All of the above"
-  echo "    ${BOLD}q)${RESET}  Quit"
-  echo ""
-  printf "  Enter choices (e.g. ${BOLD}1 3${RESET} or ${BOLD}a${RESET}): "
+  printf "  Selection ${DIM}[1 2 3 4, a, u, q]${RESET}: "
 }
 
 run_selection() {
   local choices=("$@")
   local all=false
-  for c in "${choices[@]}"; do [[ "$c" == "a" ]] && all=true; done
+  local ran=false
+
+  for choice in "${choices[@]}"; do
+    [[ "$choice" == "a" ]] && all=true
+  done
 
   echo ""
-  if $all || [[ " ${choices[*]} " == *" 1 "* ]]; then install_opencode;       echo ""; fi
-  if $all || [[ " ${choices[*]} " == *" 2 "* ]]; then install_claude_code;    echo ""; fi
-  if $all || [[ " ${choices[*]} " == *" 3 "* ]]; then install_cursor;         echo ""; fi
-  if $all || [[ " ${choices[*]} " == *" 4 "* ]]; then install_windsurf;       echo ""; fi
-  if $all || [[ " ${choices[*]} " == *" 5 "* ]]; then install_claude_desktop; echo ""; fi
-  if $all || [[ " ${choices[*]} " == *" 6 "* ]]; then install_zed;            echo ""; fi
-}
+  if $all || [[ " ${choices[*]} " == *" 1 "* ]]; then install_opencode; echo ""; ran=true; fi
+  if $all || [[ " ${choices[*]} " == *" 2 "* ]]; then install_claude_code; echo ""; ran=true; fi
+  if $all || [[ " ${choices[*]} " == *" 3 "* ]]; then install_antigravity; echo ""; ran=true; fi
+  if $all || [[ " ${choices[*]} " == *" 4 "* ]]; then install_codex; echo ""; ran=true; fi
+  if [[ " ${choices[*]} " == *" u "* ]]; then update_project; echo ""; ran=true; fi
 
-# ── Build check ───────────────────────────────────────────────────────────────
-check_build() {
-  if [[ -f "$REPO_ROOT/dist/index.js" ]]; then
-    return 0
-  fi
-  print_warn "dist/index.js not found — the project has not been built yet."
-  if confirm "Build now? (npm run build)"; then
-    print_step "Building..."
-    ( cd "$REPO_ROOT" && npm run build ) && print_ok "Build successful." || {
-      print_err "Build failed. Falling back to npx."
-    }
-    # Re-detect after build attempt
-    if [[ -f "$REPO_ROOT/dist/index.js" ]]; then
-      MCP_COMMAND="node"
-      MCP_ARGS="[\"node\", \"$REPO_ROOT/dist/index.js\"]"
-      MCP_ARGS_LIST=("node" "$REPO_ROOT/dist/index.js")
-      MCP_MODE="local (built dist)"
-      GENERIC_COMMAND="node"
-      GENERIC_ARGS_JSON="[\"$REPO_ROOT/dist/index.js\"]"
-    fi
+  if [[ "$ran" == false ]]; then
+    print_warn "No valid option selected."
   fi
 }
 
-# ── Dependency check ──────────────────────────────────────────────────────────
-check_deps() {
-  if ! command -v python3 &>/dev/null && ! command -v python &>/dev/null; then
-    print_err "Python 3 is required for JSON manipulation but was not found."
-    print_info "Install Python 3: https://www.python.org/downloads/"
-    exit 1
-  fi
-  if ! command -v node &>/dev/null; then
-    print_warn "Node.js not found in PATH. Slidev and slidev-mcp require Node ≥ 18."
-    print_info "Install Node: https://nodejs.org"
-  fi
-}
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 main() {
-  print_header
-
-  echo "  ${BOLD}Install mode:${RESET} $MCP_MODE"
-  if [[ "$MCP_MODE" == local* ]]; then
-    echo "  ${BOLD}Server path:${RESET}  $REPO_ROOT/dist/index.js"
-  fi
-  echo ""
-
   check_deps
+  detect_runtime
   check_build
+  version_status_label
 
-  echo ""
-  echo "  ${DIM}The installer will add the following MCP entry to each selected agent:${RESET}"
-  echo "  ${DIM}  command: ${MCP_ARGS}${RESET}"
-
+  print_header
+  show_status_card
   show_menu
-  read -r -a CHOICES
 
-  if [[ "${CHOICES[0]:-}" == "q" ]]; then
-    echo ""; echo "  Aborted."; exit 0
+  local choices=()
+  if ! read -r -a choices; then
+    choices=("q")
   fi
 
-  run_selection "${CHOICES[@]}"
+  if [[ "${choices[0]:-}" == "q" ]]; then
+    echo ""
+    print_info "Cancelled."
+    exit 0
+  fi
 
-  echo ""
-  echo "  ${BOLD}${GREEN}Done!${RESET} slidev-mcp has been configured."
-  echo ""
-  echo "  ${DIM}Restart your agent / reload its MCP configuration to activate the tools.${RESET}"
+  run_selection "${choices[@]}"
+
+  echo "  ${BOLD}${GREEN}Done.${RESET} ${DIM}Restart or refresh your agent to load the MCP server.${RESET}"
   echo ""
 }
 
