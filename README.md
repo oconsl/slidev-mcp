@@ -1,100 +1,145 @@
 # slidev-mcp
 
-`slidev-mcp` is a Model Context Protocol (MCP) server for creating and editing [Slidev](https://sli.dev/) presentations from AI clients.
+**Create, edit, validate, and export Slidev presentations from your AI agent.**
 
-It exposes tools to initialize presentations, add/update/delete slides, apply themes and styles, add Mermaid diagrams, configure transitions, and export output files.
+`slidev-mcp` is a local [Model Context Protocol](https://modelcontextprotocol.io/) server for [Slidev](https://sli.dev/). It gives supported AI clients a focused toolkit for building real presentation projects: initialize decks, add and update slides, apply themes and styles, insert Mermaid diagrams, verify the deck, and export final assets.
 
-## Transport and MCP usage
+## Why It Exists
 
-- Transport: **STDIO** (`@modelcontextprotocol/sdk/server/stdio`)
-- Intended usage: configure your MCP client to launch the `slidev-mcp` command.
-- Output behavior: the server reserves `stdout` for MCP JSON-RPC traffic and writes logs/errors to `stderr`.
+Slide decks are usually iterative: draft, restructure, style, verify, export, repeat. `slidev-mcp` turns that workflow into MCP tools your agent can call directly inside a trusted local workspace.
 
----
+## Highlights
 
-## Installation
+- **Built for Slidev**: works with `slides.md`, themes, transitions, Mermaid diagrams, and Slidev exports.
+- **Local-first**: runs over STDIO and operates in the current workspace.
+- **Agent-ready**: installer support for OpenCode, Claude Code, Antigravity, and Codex.
+- **Safe output behavior**: keeps `stdout` reserved for MCP JSON-RPC and sends logs/errors to `stderr`.
+- **No required environment variables**: install, configure, and start using it.
 
-### Option A — Interactive installer (recommended)
+## Requirements
 
-Clone the repository and run the installer script. It presents a TUI menu to register the MCP server in one or more agents automatically:
+- Node.js `>=18`
+- npm
+- Python 3, used by the installer to patch JSON/TOML config files
+
+## Quick Start
+
+Clone, install, build, and run the interactive installer:
 
 ```bash
-git clone https://github.com/your-org/slidev-mcp.git
+git clone <repo-url> slidev-mcp
 cd slidev-mcp
-npm install && npm run build
+npm install
+npm run build
 bash scripts/install.sh
 ```
 
-The installer will:
+The installer detects whether it can use the local build:
 
-1. Detect whether to use the local build (`node dist/index.js`) or fall back to `npx slidev-mcp`.
-2. Offer a menu to choose which agents to configure (Opencode, Claude Code, Cursor, Windsurf, Claude Desktop, Zed).
-3. Ask for the configuration scope (global or project-level) when applicable.
-4. Patch the appropriate JSON config file in-place — preserving all existing settings.
-
-```
-╔══════════════════════════════════════════════════╗
-║          slidev-mcp  ·  MCP Installer            ║
-╚══════════════════════════════════════════════════╝
-
-  Install mode: local (built dist)
-  Server path:  /your/path/slidev-mcp/dist/index.js
-
-  Select agents to configure:
-
-    1)  Opencode
-    2)  Claude Code  (claude CLI)
-    3)  Cursor
-    4)  Windsurf
-    5)  Claude Desktop
-    6)  Zed
-    a)  All of the above
-    q)  Quit
-
-  Enter choices (e.g. 1 3 or a):
+```bash
+node /path/to/slidev-mcp/dist/index.js
 ```
 
----
-
-### Option B — npx (no install)
-
-Use directly via `npx` without cloning the repo. Point your agent to:
+If `dist/index.js` is missing, it falls back to:
 
 ```bash
 npx -y slidev-mcp
 ```
 
----
+## Interactive Installer
 
-### Option C — Manual configuration
+Run:
 
-Add the following entry to your agent's MCP config file.
+```bash
+bash scripts/install.sh
+```
 
-#### Opencode — `~/.config/opencode/opencode.json` or `./opencode.json`
+The installer can configure:
+
+- OpenCode
+- Claude Code
+- Antigravity
+- Codex
+
+It also includes an **Update** option. The menu shows whether the local package appears up to date, has an update available, or could not determine the status.
+
+```text
+slidev-mcp interactive installer
+Configure MCP once, then get back to making slides.
+
+Runtime
+  mode:    local build
+  command: node /path/to/slidev-mcp/dist/index.js
+  version: update available v0.1.0 -> v0.3.2
+
+Choose what to configure
+
+  1) OpenCode
+  2) Claude Code
+  3) Antigravity
+  4) Codex
+  a) All four
+  u) Update slidev-mcp [update available v0.1.0 -> v0.3.2]
+  q) Quit
+```
+
+When updating from a git checkout, the installer runs:
+
+```bash
+git pull --ff-only
+npm install
+npm run build
+```
+
+If the working tree has uncommitted changes, it asks before pulling.
+
+## Manual Configuration
+
+Use manual configuration when you prefer to edit client config files yourself or cannot run the installer.
+
+### OpenCode
+
+Config paths:
+
+- Global: `~/.config/opencode/opencode.json`
+- Project: `./opencode.json`
 
 ```json
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "slidev-mcp": {
+      "type": "local",
       "command": ["npx", "-y", "slidev-mcp"],
-      "enabled": true,
-      "type": "local"
+      "enabled": true
     }
   }
 }
 ```
 
-#### Claude Code (claude CLI)
+### Claude Code
+
+Use the Claude CLI:
 
 ```bash
-# Global (all projects)
 claude mcp add --scope user slidev-mcp -- npx -y slidev-mcp
+```
 
-# Or: local build
+For a local build:
+
+```bash
 claude mcp add --scope user slidev-mcp -- node /path/to/slidev-mcp/dist/index.js
 ```
 
-#### Cursor — `~/.cursor/mcp.json` or `.cursor/mcp.json`
+Supported scopes are `user`, `local`, and `project`.
+
+### Antigravity
+
+Config path:
+
+```text
+~/.gemini/antigravity/mcp_config.json
+```
 
 ```json
 {
@@ -107,109 +152,78 @@ claude mcp add --scope user slidev-mcp -- node /path/to/slidev-mcp/dist/index.js
 }
 ```
 
-#### Windsurf — `~/.codeium/windsurf/mcp_config.json`
+### Codex
 
-```json
-{
-  "mcpServers": {
-    "slidev-mcp": {
-      "command": "npx",
-      "args": ["-y", "slidev-mcp"]
-    }
-  }
-}
+Config paths:
+
+- Global: `~/.codex/config.toml`
+- Project: `.codex/config.toml`
+
+```toml
+[mcp_servers.slidev-mcp]
+command = "npx"
+args = ["-y", "slidev-mcp"]
+type = "stdio"
 ```
 
-#### Claude Desktop — `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
+For a local build:
 
-```json
-{
-  "mcpServers": {
-    "slidev-mcp": {
-      "command": "npx",
-      "args": ["-y", "slidev-mcp"]
-    }
-  }
-}
+```toml
+[mcp_servers.slidev-mcp]
+command = "node"
+args = ["/path/to/slidev-mcp/dist/index.js"]
+type = "stdio"
 ```
 
-Windows path: `%APPDATA%\Claude\claude_desktop_config.json`
+## MCP Tools
 
-#### Zed — `~/.config/zed/settings.json`
+| Tool | What it does |
+|---|---|
+| `init_presentation` | Create a Slidev project, scaffold `slides.md`, and install dependencies |
+| `add_slide` | Append or insert a slide |
+| `update_slide` | Replace the content of an existing slide |
+| `delete_slide` | Delete a slide, while protecting the last slide |
+| `list_slides` | Inspect slide order, previews, and frontmatter |
+| `set_theme` | Change the Slidev theme and optionally install the theme package |
+| `set_style` | Apply global CSS, per-slide style blocks, or UnoCSS classes |
+| `set_slide_transition` | Configure transitions, `v-click` reveals, and `v-motion` animations |
+| `add_diagram` | Insert Mermaid diagrams |
+| `export_presentation` | Export to PDF, PNG, or a static SPA build |
+| `verify_presentation` | Validate `slides.md` and flag common rendering issues |
 
-```json
-{
-  "context_servers": {
-    "slidev-mcp": {
-      "command": {
-        "path": "npx",
-        "args": ["-y", "slidev-mcp"]
-      },
-      "settings": {}
-    }
-  }
-}
-```
+If behavior differs between documentation and code, treat `src/tools/*.ts` as the source of truth.
 
----
+## Runtime Behavior
 
-## Local development
+- Transport: STDIO via `@modelcontextprotocol/sdk/server/stdio`
+- Working directory: `process.cwd()`
+- Project discovery: finds `slides.md` in the current directory or one immediate child directory
+- Logging: writes logs and errors to `stderr`
+- MCP protocol output: writes JSON-RPC traffic to `stdout`
+
+## Local Development
 
 ```bash
 npm install
 npm run build
-node dist/index.js        # production
-npm run dev               # TypeScript watch mode
+npm run typecheck
+node dist/index.js
 ```
 
----
+For development without building:
 
-## Tools summary
+```bash
+npm run dev
+```
 
-The server registers these MCP tools:
+## Security
 
-| Tool | Description |
-|---|---|
-| `init_presentation` | Create a new Slidev project, scaffold `slides.md`, install deps |
-| `add_slide` | Append or insert a slide at a given index |
-| `update_slide` | Replace the content of an existing slide |
-| `delete_slide` | Remove a slide (the last slide cannot be deleted) |
-| `list_slides` | Inspect slide list, previews, and frontmatter presence |
-| `set_theme` | Update Slidev theme and optionally install theme package |
-| `set_style` | Apply global CSS, per-slide style blocks, or UnoCSS classes |
-| `set_slide_transition` | Configure transitions, `v-click` reveals, and `v-motion` animations |
-| `add_diagram` | Insert Mermaid diagrams as slide content |
-| `export_presentation` | Export as `pdf`, `png`, or `spa` static build |
-| `verify_presentation` | Validate `slides.md` syntax and detect common rendering issues |
-
-If behavior details differ between versions, use `src/tools/*.ts` as the source of truth.
-
----
-
-## Configuration
-
-This server operates in the process working directory (`process.cwd()`).
-
-- It auto-discovers a Slidev project if `slides.md` exists in the current directory or one immediate subdirectory.
-- `init_presentation` can also create and attach a new project directory.
-- No environment variables are required. See `.env.example` for the intentionally empty env template.
-
----
-
-## Security notes
-
-- Keep this MCP server scoped to trusted local workspaces.
-- Do not expose the process to untrusted prompts with filesystem access expectations.
-- Some tools execute local commands (`npm`, `npx slidev`) in project directories.
-- Avoid running with elevated privileges.
-- Review `SECURITY.md` for reporting and operational guidance.
-
----
+Run this server only in trusted local workspaces. Some tools execute local commands such as `npm` and `npx slidev` inside the active project directory. Avoid elevated privileges, review generated files before publishing, and see [SECURITY.md](SECURITY.md) for reporting and operational guidance.
 
 ## Contributing
 
-Contributions are welcome. Please read `CONTRIBUTING.md` for setup, validation commands, and pull request expectations.
+Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup, validation, and pull request guidance.
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [LICENSE](LICENSE).
