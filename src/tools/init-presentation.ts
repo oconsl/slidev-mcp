@@ -7,6 +7,7 @@ import { spawnAsync } from "../lib/shell.js";
 import { validateProjectName } from "../lib/validator.js";
 import {
   DEFAULT_THEME,
+  DEFAULT_CANVAS_WIDTH,
   DEFAULT_COLOR_SCHEMA,
   DEFAULT_ASPECT_RATIO,
   DEFAULT_TRANSITION,
@@ -31,6 +32,7 @@ function buildInitialSlidesmd(title: string, theme?: string): string {
     `---`,
     `title: "${title.replace(/"/g, '\\"')}"`,
     `theme: ${resolvedTheme}`,
+    `canvasWidth: ${DEFAULT_CANVAS_WIDTH}`,
     `colorSchema: ${DEFAULT_COLOR_SCHEMA}`,
     `aspectRatio: "${DEFAULT_ASPECT_RATIO}"`,
     `transition: ${DEFAULT_TRANSITION}`,

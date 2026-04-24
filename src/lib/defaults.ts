@@ -12,6 +12,10 @@ export const DEFAULT_THEME = "seriph";
 /** Force the dark variant of the theme. Slidev themes that support dark/light use this key. */
 export const DEFAULT_COLOR_SCHEMA = "dark";
 
+// ── Canvas ───────────────────────────────────────────────────────────────────
+/** Standard Slidev canvas width used for newly initialized presentations. */
+export const DEFAULT_CANVAS_WIDTH = 1080;
+
 // ── Base-style protection guide for Tailwind/UnoCSS classes ──────────────────
 /**
  * Guidance for using Tailwind/UnoCSS utility classes in Slidev frontmatter (class field)
