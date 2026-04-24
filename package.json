@@ -1,6 +1,6 @@
 {
   "name": "slidev-mcp",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "MCP server for creating and managing Slidev presentations",
   "license": "MIT",
   "keywords": [
