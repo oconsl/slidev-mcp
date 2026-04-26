@@ -21,6 +21,8 @@ const InitPresentationSchema = z.object({
   theme: z.string().optional(),
 });
 
+const SLIDEV_CLI_VERSION = "52.14.2";
+
 /**
  * Builds the initial slides.md content with global frontmatter and two starter slides.
  * The first slide uses `cover` layout (matching the preferred presentation style).
@@ -58,7 +60,7 @@ function buildInitialSlidesmd(title: string, theme?: string): string {
 function buildPackageJson(projectName: string, theme?: string): string {
   const resolvedTheme = theme ?? DEFAULT_THEME;
   const deps: Record<string, string> = {
-    "@slidev/cli": "^0.52.0",
+    "@slidev/cli": SLIDEV_CLI_VERSION,
     "@slidev/theme-default": "latest",
   };
 
@@ -78,6 +80,9 @@ function buildPackageJson(projectName: string, theme?: string): string {
         format: "slidev format",
       },
       dependencies: deps,
+      engines: {
+        node: ">=20.12.0",
+      },
     },
     null,
     2
