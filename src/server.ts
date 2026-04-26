@@ -10,6 +10,8 @@ import { registerSetStyle } from "./tools/set-style.js";
 import { registerSetSlideTransition } from "./tools/set-slide-transition.js";
 import { registerAddDiagram } from "./tools/add-diagram.js";
 import { registerVerifyPresentation } from "./tools/verify-presentation.js";
+import { registerGetProjectInfo } from "./tools/get-project-info.js";
+import { registerRepairPresentation } from "./tools/repair-presentation.js";
 
 /**
  * Registers all Slidev MCP tools on the given server instance.
@@ -28,4 +30,6 @@ export function registerTools(server: McpServer): void {
   registerSetSlideTransition(server);
   registerAddDiagram(server);
   registerVerifyPresentation(server);
+  registerGetProjectInfo(server);
+  registerRepairPresentation(server);
 }

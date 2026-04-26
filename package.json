@@ -1,6 +1,6 @@
 {
   "name": "slidev-mcp",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "MCP server for creating and managing Slidev presentations",
   "license": "MIT",
   "keywords": [
@@ -24,13 +24,16 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "node --loader ts-node/esm src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "dev": "npm run build && node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test dist/**/*.test.js",
+    "test:watch": "npm run build && node --test --watch dist/**/*.test.js",
+    "check": "npm run typecheck && npm test"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.10.2",
+    "@modelcontextprotocol/sdk": "^1.17.5",
     "js-yaml": "^4.1.0",
-    "zod": "^3.24.2"
+    "zod": "^3.25.1"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

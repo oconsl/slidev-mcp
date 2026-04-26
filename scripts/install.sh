@@ -7,6 +7,10 @@ set -euo pipefail
 
 SERVER_NAME="slidev-mcp"
 NPM_PACKAGE="slidev-mcp"
+NON_INTERACTIVE=false
+DRY_RUN=false
+TARGET="opencode"
+SCOPE="global"
 
 # --- Chalk-like colors --------------------------------------------------------
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
@@ -43,6 +47,46 @@ print_ok() { echo "  ${OK}  $1"; }
 print_warn() { echo "  ${WARN}  ${YELLOW}$1${RESET}"; }
 print_err() { echo "  ${ERR}  ${RED}$1${RESET}"; }
 print_info() { echo "  ${INFO}  ${DIM}$1${RESET}"; }
+
+usage() {
+  cat <<EOF
+slidev-mcp installer
+
+Usage:
+  bash scripts/install.sh
+  bash scripts/install.sh --non-interactive --target codex --scope global
+
+Options:
+  --non-interactive          Run without prompts.
+  --target VALUE             opencode | claude | antigravity | codex | all
+  --scope VALUE              global | project | both
+  --dry-run                  Print actions without writing config files.
+  -h, --help                 Show this help.
+EOF
+}
+
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --non-interactive) NON_INTERACTIVE=true; shift ;;
+      --dry-run) DRY_RUN=true; shift ;;
+      --target) TARGET="${2:-}"; shift 2 ;;
+      --scope) SCOPE="${2:-}"; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      *) print_err "Unknown argument: $1"; usage; exit 1 ;;
+    esac
+  done
+
+  case "$TARGET" in
+    opencode|claude|antigravity|codex|all) ;;
+    *) print_err "Invalid --target: $TARGET"; exit 1 ;;
+  esac
+
+  case "$SCOPE" in
+    global|project|both) ;;
+    *) print_err "Invalid --scope: $SCOPE"; exit 1 ;;
+  esac
+}
 
 confirm() {
   local prompt="${1:-Continue?}"
@@ -93,9 +137,21 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 detect_runtime() {
   if [[ -f "$REPO_ROOT/dist/index.js" ]]; then
     MCP_MODE="local build"
-    MCP_COMMAND="node"
-    MCP_ARGS=("$REPO_ROOT/dist/index.js")
-    OPENCODE_COMMAND=("node" "$REPO_ROOT/dist/index.js")
+    if command -v node >/dev/null 2>&1; then
+      MCP_COMMAND="node"
+      MCP_ARGS=("$REPO_ROOT/dist/index.js")
+      OPENCODE_COMMAND=("node" "$REPO_ROOT/dist/index.js")
+    elif command -v deno >/dev/null 2>&1; then
+      MCP_COMMAND="deno"
+      MCP_ARGS=("run" "-A" "$REPO_ROOT/dist/index.js")
+      OPENCODE_COMMAND=("deno" "run" "-A" "$REPO_ROOT/dist/index.js")
+    else
+      print_warn "dist/index.js was found, but neither node nor deno is available in PATH."
+      MCP_MODE="npm package"
+      MCP_COMMAND="npx"
+      MCP_ARGS=("-y" "$NPM_PACKAGE")
+      OPENCODE_COMMAND=("npx" "-y" "$NPM_PACKAGE")
+    fi
   else
     MCP_MODE="npm package"
     MCP_COMMAND="npx"
@@ -172,6 +228,10 @@ check_build() {
 # --- Config writers -----------------------------------------------------------
 write_opencode_config() {
   local file="$1"
+  if [[ "$DRY_RUN" == true ]]; then
+    print_info "dry-run: would write OpenCode config to $file"
+    return 0
+  fi
   run_python - "$file" "$OPENCODE_COMMAND_JSON" <<'PY'
 import json
 import os
@@ -203,6 +263,10 @@ PY
 
 write_mcpservers_config() {
   local file="$1"
+  if [[ "$DRY_RUN" == true ]]; then
+    print_info "dry-run: would write mcpServers config to $file"
+    return 0
+  fi
   run_python - "$file" "$MCP_COMMAND" "$MCP_ARGS_JSON" <<'PY'
 import json
 import os
@@ -233,6 +297,10 @@ PY
 
 write_codex_config() {
   local file="$1"
+  if [[ "$DRY_RUN" == true ]]; then
+    print_info "dry-run: would write Codex config to $file"
+    return 0
+  fi
   run_python - "$file" "$MCP_COMMAND" "$MCP_ARGS_JSON" <<'PY'
 import json
 import os
@@ -281,6 +349,15 @@ choose_scope() {
   local project_path="$3"
   local choice
 
+  if [[ "$NON_INTERACTIVE" == true ]]; then
+    case "$SCOPE" in
+      global) SELECTED_TARGETS=("$global_path") ;;
+      project) SELECTED_TARGETS=("$project_path") ;;
+      both) SELECTED_TARGETS=("$global_path" "$project_path") ;;
+    esac
+    return
+  fi
+
   echo ""
   echo "    ${BOLD}$title scope${RESET}"
   echo "    ${BOLD}1)${RESET} Global   ${DIM}$global_path${RESET}"
@@ -322,6 +399,13 @@ install_claude_code() {
   fi
 
   local choice scope_flag
+  if [[ "$NON_INTERACTIVE" == true ]]; then
+    case "$SCOPE" in
+      global) scope_flag="--scope user" ;;
+      project) scope_flag="--scope project" ;;
+      both) scope_flag="--scope user" ;;
+    esac
+  else
   echo ""
   echo "    ${BOLD}Claude Code scope${RESET}"
   echo "    ${BOLD}1)${RESET} User     ${DIM}global, all projects${RESET}"
@@ -337,6 +421,12 @@ install_claude_code() {
     3) scope_flag="--scope project" ;;
     *) print_warn "Invalid choice. Using user scope."; scope_flag="--scope user" ;;
   esac
+  fi
+
+  if [[ "$DRY_RUN" == true ]]; then
+    print_info "dry-run: would run claude mcp add $scope_flag $SERVER_NAME -- $(shell_join "$MCP_COMMAND" "${MCP_ARGS[@]}")"
+    return
+  fi
 
   claude mcp remove "$SERVER_NAME" $scope_flag >/dev/null 2>&1 || true
 
@@ -466,10 +556,26 @@ run_selection() {
 }
 
 main() {
+  parse_args "$@"
   check_deps
   detect_runtime
   check_build
   version_status_label
+
+  if [[ "$NON_INTERACTIVE" == true ]]; then
+    print_header
+    show_status_card
+    case "$TARGET" in
+      opencode) run_selection 1 ;;
+      claude) run_selection 2 ;;
+      antigravity) run_selection 3 ;;
+      codex) run_selection 4 ;;
+      all) run_selection a ;;
+    esac
+    echo "  ${BOLD}${GREEN}Done.${RESET} ${DIM}Restart or refresh your agent to load the MCP server.${RESET}"
+    echo ""
+    exit 0
+  fi
 
   print_header
   show_status_card

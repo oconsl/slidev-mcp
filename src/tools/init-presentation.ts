@@ -2,9 +2,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import fs from "node:fs";
 import path from "node:path";
-import { setProjectPath } from "../state.js";
+import { getWorkspaceRoot, setProjectPath } from "../state.js";
 import { spawnAsync } from "../lib/shell.js";
-import { validateProjectName } from "../lib/validator.js";
+import { safePath, validateProjectName } from "../lib/validator.js";
+import { toolError, toolSuccess } from "../lib/tool-response.js";
 import {
   DEFAULT_THEME,
   DEFAULT_CANVAS_WIDTH,
@@ -19,6 +20,9 @@ const InitPresentationSchema = z.object({
   project_name: z.string().min(1),
   title: z.string().min(1),
   theme: z.string().optional(),
+  preset: z.enum(["minimal", "agent-dark", "custom"]).optional().default("agent-dark"),
+  install_dependencies: z.boolean().optional().default(true),
+  overwrite: z.boolean().optional().default(false),
 });
 
 const SLIDEV_CLI_VERSION = "52.14.2";
@@ -27,8 +31,23 @@ const SLIDEV_CLI_VERSION = "52.14.2";
  * Builds the initial slides.md content with global frontmatter and two starter slides.
  * The first slide uses `cover` layout (matching the preferred presentation style).
  */
-function buildInitialSlidesmd(title: string, theme?: string): string {
+function buildInitialSlidesmd(
+  title: string,
+  theme?: string,
+  preset: "minimal" | "agent-dark" | "custom" = "agent-dark"
+): string {
   const resolvedTheme = theme ?? DEFAULT_THEME;
+  if (preset === "minimal") {
+    return [
+      `---`,
+      `title: "${title.replace(/"/g, '\\"')}"`,
+      `theme: ${resolvedTheme}`,
+      `---`,
+      ``,
+      `# ${title}`,
+      ``,
+    ].join("\n");
+  }
 
   return [
     `---`,
@@ -784,7 +803,7 @@ export function registerInitPresentation(server: McpServer): void {
     "Initialize a new Slidev presentation project. Creates the project directory, installs dependencies, and generates a slides.md file.",
     InitPresentationSchema.shape,
     async (params) => {
-      const { project_name, title, theme } = params;
+      const { project_name, title, theme, preset, install_dependencies, overwrite } = params;
       const resolvedTheme = theme ?? DEFAULT_THEME;
 
       // Validate project name
@@ -797,13 +816,14 @@ export function registerInitPresentation(server: McpServer): void {
         };
       }
 
-      const workspaceRoot = process.cwd();
-      const projectDir = path.resolve(workspaceRoot, project_name);
+      const workspaceRoot = getWorkspaceRoot();
+      const projectDir = safePath(workspaceRoot, project_name);
+      const createdPaths: string[] = [];
 
       // Check for existing directory — attach to it if it already has a slides.md
       if (fs.existsSync(projectDir)) {
         const existingSlidesPath = path.join(projectDir, "slides.md");
-        if (fs.existsSync(existingSlidesPath)) {
+        if (!overwrite && fs.existsSync(existingSlidesPath)) {
           // Attach to the existing Slidev project without modifying anything
           setProjectPath(projectDir);
           const slideCount = (() => {
@@ -814,123 +834,95 @@ export function registerInitPresentation(server: McpServer): void {
               return 0;
             }
           })();
-          return {
-            content: [
-              {
-                type: "text",
-                text: JSON.stringify({
-                  success: true,
-                  projectPath: projectDir,
-                  attached: true,
-                  slideCount,
-                  message: `Attached to existing Slidev project at ${projectDir}`,
-                }),
-              },
-            ],
-          };
+          return toolSuccess({
+            projectPath: projectDir,
+            attached: true,
+            slideCount,
+            message: `Attached to existing Slidev project at ${projectDir}`,
+          });
         }
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Error: Directory "${project_name}" already exists at ${projectDir} but contains no slides.md. ` +
-                `Remove or rename the directory, or point to an existing Slidev project.`,
-            },
-          ],
-          isError: true,
-        };
+        if (!overwrite) {
+          return toolError(
+            "PROJECT_EXISTS",
+            `Directory "${project_name}" already exists at ${projectDir} but contains no slides.md. Pass overwrite: true to replace it.`
+          );
+        }
+
+        fs.rmSync(projectDir, { recursive: true, force: true });
       }
 
       try {
         // Create project directory
         fs.mkdirSync(projectDir, { recursive: true });
+        createdPaths.push(projectDir);
 
         // Write package.json
-        fs.writeFileSync(
-          path.join(projectDir, "package.json"),
-          buildPackageJson(project_name, theme),
-          "utf8"
-        );
+        const packageJsonPath = path.join(projectDir, "package.json");
+        fs.writeFileSync(packageJsonPath, buildPackageJson(project_name, theme), "utf8");
 
         // Write slides.md
-        fs.writeFileSync(
-          path.join(projectDir, "slides.md"),
-          buildInitialSlidesmd(title, resolvedTheme),
-          "utf8"
-        );
+        const slidesPath = path.join(projectDir, "slides.md");
+        fs.writeFileSync(slidesPath, buildInitialSlidesmd(title, resolvedTheme, preset), "utf8");
 
-        // Write default global style file (dark minimal palette)
-        fs.writeFileSync(
-          path.join(projectDir, "style.css"),
-          DEFAULT_GLOBAL_STYLE_CSS,
-          "utf8"
-        );
+        const componentFiles =
+          preset === "agent-dark" || preset === "custom" ? buildComponentFiles() : {};
 
-        // Write bundled Vue components into components/ directory.
-        // Slidev auto-registers any .vue file found in components/ — no imports needed.
-        const componentsDir = path.join(projectDir, "components");
-        fs.mkdirSync(componentsDir, { recursive: true });
-        const componentFiles = buildComponentFiles();
-        for (const [filename, content] of Object.entries(componentFiles)) {
-          fs.writeFileSync(path.join(componentsDir, filename), content, "utf8");
+        if (preset === "agent-dark" || preset === "custom") {
+          fs.writeFileSync(path.join(projectDir, "style.css"), DEFAULT_GLOBAL_STYLE_CSS, "utf8");
+
+          // Slidev auto-registers any .vue file found in components/.
+          const componentsDir = path.join(projectDir, "components");
+          fs.mkdirSync(componentsDir, { recursive: true });
+          for (const [filename, content] of Object.entries(componentFiles)) {
+            fs.writeFileSync(path.join(componentsDir, filename), content, "utf8");
+          }
         }
 
-        // Run npm install
-        process.stderr.write(
-          `[slidev-mcp] Running npm install in ${projectDir}...\n`
-        );
-        const result = await spawnAsync("npm", ["install"], {
-          cwd: projectDir,
-        });
+        if (install_dependencies) {
+          process.stderr.write(
+            `[slidev-mcp] Running npm install in ${projectDir}...\n`
+          );
+          const result = await spawnAsync("npm", ["install"], {
+            cwd: projectDir,
+            timeoutMs: 300000,
+          });
 
-        if (result.exitCode !== 0) {
-          // Clean up on failure
-          fs.rmSync(projectDir, { recursive: true, force: true });
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Error: npm install failed.\n\nstderr:\n${result.stderr}`,
-              },
-            ],
-            isError: true,
-          };
+          if (result.exitCode !== 0) {
+            for (const createdPath of createdPaths.reverse()) {
+              if (fs.existsSync(createdPath)) {
+                fs.rmSync(createdPath, { recursive: true, force: true });
+              }
+            }
+            return toolError("NPM_INSTALL_FAILED", "npm install failed.", {
+              stderr: result.stderr,
+            });
+          }
         }
 
         // Set the project path in state
         setProjectPath(projectDir);
 
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify({
-                success: true,
-                projectPath: projectDir,
-                slideCount: 2,
-                theme: resolvedTheme,
-                styleFile: path.join(projectDir, "style.css"),
-                components: Object.keys(componentFiles),
-                message: `Presentation "${title}" initialized at ${projectDir}`,
-              }),
-            },
-          ],
-        };
+        return toolSuccess({
+          projectPath: projectDir,
+          slideCount: preset === "minimal" ? 1 : 2,
+          theme: resolvedTheme,
+          preset,
+          dependenciesInstalled: install_dependencies,
+          styleFile:
+            preset === "agent-dark" || preset === "custom"
+              ? path.join(projectDir, "style.css")
+              : null,
+          components: Object.keys(componentFiles),
+          message: `Presentation "${title}" initialized at ${projectDir}`,
+        });
       } catch (err) {
-        // Clean up partial directory on unexpected error
-        if (fs.existsSync(projectDir)) {
-          fs.rmSync(projectDir, { recursive: true, force: true });
+        for (const createdPath of createdPaths.reverse()) {
+          if (fs.existsSync(createdPath)) {
+            fs.rmSync(createdPath, { recursive: true, force: true });
+          }
         }
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Error: ${(err as Error).message}`,
-            },
-          ],
-          isError: true,
-        };
+        return toolError("INIT_FAILED", (err as Error).message);
       }
     }
   );

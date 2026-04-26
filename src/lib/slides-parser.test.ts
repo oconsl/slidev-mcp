@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parse, serialize } from "./slides-parser.js";
+import { parse, parsePresentationDocument, parseSlideInput, serialize } from "./slides-parser.js";
 
 test("parse canonical Slidev format and first-frontmatter behavior", () => {
   const raw = [
@@ -68,6 +68,54 @@ test("preserves per-slide frontmatter and avoids ghost slides on edit-like round
   assert.equal(reparsed.slides[1].content, "# Body\n\nUpdated");
 });
 
+test("serializes later per-slide frontmatter without duplicate separators", () => {
+  const raw = [
+    "---",
+    "title: Demo",
+    "---",
+    "# Intro",
+    "---",
+    "---",
+    "layout: two-cols",
+    "---",
+    "# Details",
+    "---",
+    "---",
+    "layout: image-right",
+    "---",
+    "# Wrap",
+  ].join("\n");
+
+  const output = serialize(parse(raw));
+  const reparsed = parse(output);
+
+  assert.equal(output.includes("# Intro\n---\n---\nlayout: two-cols"), false);
+  assert.equal(output.includes("# Details\n---\n---\nlayout: image-right"), false);
+  assert.equal(reparsed.slides.length, 3);
+  assert.equal(reparsed.slides[1].frontmatter, "layout: two-cols");
+  assert.equal(reparsed.slides[1].content, "# Details");
+  assert.equal(reparsed.slides[2].frontmatter, "layout: image-right");
+  assert.equal(reparsed.slides[2].content, "# Wrap");
+});
+
+test("parses canonical single-separator per-slide frontmatter", () => {
+  const raw = [
+    "---",
+    "title: Demo",
+    "---",
+    "# Intro",
+    "---",
+    "layout: two-cols",
+    "---",
+    "# Details",
+  ].join("\n");
+
+  const parsed = parse(raw);
+  assert.equal(parsed.slides.length, 2);
+  assert.equal(parsed.slides[1].frontmatter, "layout: two-cols");
+  assert.equal(parsed.slides[1].content, "# Details");
+});
+
 test("ignores --- inside code fences", () => {
   const raw = [
     "---",
@@ -90,4 +138,19 @@ test("ignores --- inside code fences", () => {
   assert.equal(parsed.slides.length, 2);
   assert.ok(parsed.slides[0].content.includes("```yaml"));
   assert.ok(parsed.slides[0].content.includes("a: b"));
+});
+
+test("parse document reports leading whitespace while parse remains forgiving", () => {
+  const raw = " \n---\ntitle: Demo\n---\n# Slide 1";
+  const document = parsePresentationDocument(raw);
+
+  assert.equal(parse(raw).slides.length, 1);
+  assert.ok(document.diagnostics.some((issue) => issue.code === "LEADING_WHITESPACE"));
+});
+
+test("parseSlideInput rejects ambiguous bare separators outside fences", () => {
+  assert.throws(
+    () => parseSlideInput("# Bad\n\n---\n\nStill same input"),
+    /bare '---' separator/
+  );
 });

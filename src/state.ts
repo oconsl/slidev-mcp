@@ -12,8 +12,16 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { safePath } from "./lib/validator.js";
 
 let currentProjectPath: string | undefined;
+const workspaceRoot = path.resolve(process.cwd());
+
+export interface ProjectContext {
+  workspaceRoot: string;
+  projectPath: string;
+  slidesPath: string;
+}
 
 /**
  * Tries to find a Slidev project (slides.md) starting from `dir`.
@@ -54,17 +62,17 @@ function discoverSlidevProject(dir: string): string | undefined {
  */
 export function getProjectPath(): string {
   if (currentProjectPath) {
-    return currentProjectPath;
+    return safePath(workspaceRoot, path.relative(workspaceRoot, currentProjectPath));
   }
 
   const discovered = discoverSlidevProject(process.cwd());
   if (discovered) {
     // Cache it so we don't re-scan on every tool call
-    currentProjectPath = discovered;
+    currentProjectPath = safePath(workspaceRoot, path.relative(workspaceRoot, discovered));
     process.stderr.write(
       `[slidev-mcp] Auto-discovered Slidev project at: ${discovered}\n`
     );
-    return discovered;
+    return currentProjectPath;
   }
 
   throw new Error(
@@ -77,7 +85,21 @@ export function getProjectPath(): string {
  * Sets the current project path. Called by init_presentation.
  */
 export function setProjectPath(p: string): void {
-  currentProjectPath = p;
+  const resolved = path.resolve(p);
+  currentProjectPath = safePath(workspaceRoot, path.relative(workspaceRoot, resolved));
+}
+
+export function resolveProject(): ProjectContext {
+  const projectPath = getProjectPath();
+  return {
+    workspaceRoot,
+    projectPath,
+    slidesPath: safePath(projectPath, "slides.md"),
+  };
+}
+
+export function getWorkspaceRoot(): string {
+  return workspaceRoot;
 }
 
 /**

@@ -47,6 +47,43 @@ test("verify: valid presentation with per-slide frontmatter passes", () => {
   assert.equal(result.errorCount, 0);
 });
 
+test("verify: valid next-slide frontmatter after a slide separator passes", () => {
+  const raw = lines(
+    "---",
+    "title: Demo",
+    "---",
+    "# Intro",
+    "---",
+    "---",
+    "layout: two-cols",
+    "---",
+    "# Details"
+  );
+  const result = verifySlidesMd(raw);
+  assert.equal(result.valid, true);
+  assert.equal(result.errorCount, 0);
+  assert.equal(
+    result.issues.some((i) => i.code === "CONSECUTIVE_SEPARATORS"),
+    false
+  );
+});
+
+test("verify: canonical single-separator per-slide frontmatter passes", () => {
+  const raw = lines(
+    "---",
+    "title: Demo",
+    "---",
+    "# Intro",
+    "---",
+    "layout: two-cols",
+    "---",
+    "# Details"
+  );
+  const result = verifySlidesMd(raw);
+  assert.equal(result.valid, true);
+  assert.equal(result.errorCount, 0);
+});
+
 test("verify: --- inside code fence is NOT flagged as separator", () => {
   const raw = lines(
     "---",
@@ -195,6 +232,26 @@ test("verify: empty slide between two slides produces EMPTY_SLIDE warning", () =
   const emptySlides = result.issues.filter((i) => i.code === "EMPTY_SLIDE");
   assert.ok(emptySlides.length > 0, "Expected at least one EMPTY_SLIDE warning");
   assert.equal(emptySlides[0].severity, "warning");
+});
+
+test("verify: corrupt consecutive separators followed by content still errors", () => {
+  const raw = lines(
+    "---",
+    "title: Demo",
+    "---",
+    "# Slide 1",
+    "---",
+    "---",
+    "# Slide 3"
+  );
+  const result = verifySlidesMd(raw);
+  const consecutive = result.issues.find((i) => i.code === "CONSECUTIVE_SEPARATORS");
+  const emptySlides = result.issues.filter((i) => i.code === "EMPTY_SLIDE");
+
+  assert.equal(result.valid, false);
+  assert.ok(consecutive, "Expected CONSECUTIVE_SEPARATORS issue");
+  assert.equal(consecutive.severity, "error");
+  assert.ok(emptySlides.length > 0, "Expected at least one EMPTY_SLIDE warning");
 });
 
 // ─── Summary messages ─────────────────────────────────────────────────────────

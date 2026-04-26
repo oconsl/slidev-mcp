@@ -11,7 +11,7 @@ import { registerTools } from "./server.js";
 async function main() {
   const server = new McpServer({
     name: "slidev-mcp",
-    version: "1.0.0",
+    version: "1.1.0",
   });
 
   registerTools(server);

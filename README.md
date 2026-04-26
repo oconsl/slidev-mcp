@@ -40,6 +40,12 @@ The installer detects whether it can use the local build:
 node /path/to/slidev-mcp/dist/index.js
 ```
 
+If `node` is unavailable but `deno` is installed, the installer uses the local build through Deno:
+
+```bash
+deno run -A /path/to/slidev-mcp/dist/index.js
+```
+
 If `dist/index.js` is missing, it falls back to:
 
 ```bash
@@ -60,6 +66,15 @@ The installer can configure:
 - Claude Code
 - Antigravity
 - Codex
+
+For CI or scripted setup, use non-interactive mode:
+
+```bash
+bash scripts/install.sh --non-interactive --target codex --scope global
+bash scripts/install.sh --non-interactive --target all --scope project --dry-run
+```
+
+Targets are `opencode`, `claude`, `antigravity`, `codex`, or `all`. Scopes are `global`, `project`, or `both`.
 
 It also includes an **Update** option. The menu shows whether the local package appears up to date, has an update available, or could not determine the status.
 
@@ -117,6 +132,21 @@ Config paths:
 }
 ```
 
+For a Deno-powered local build, use:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "slidev-mcp": {
+      "type": "local",
+      "command": ["deno", "run", "-A", "/path/to/slidev-mcp/dist/index.js"],
+      "enabled": true
+    }
+  }
+}
+```
+
 ### Claude Code
 
 Use the Claude CLI:
@@ -129,6 +159,12 @@ For a local build:
 
 ```bash
 claude mcp add --scope user slidev-mcp -- node /path/to/slidev-mcp/dist/index.js
+```
+
+If your environment does not have `node` available, Deno can run the built server:
+
+```bash
+claude mcp add --scope user slidev-mcp -- deno run -A /path/to/slidev-mcp/dist/index.js
 ```
 
 Supported scopes are `user`, `local`, and `project`.
@@ -175,21 +211,40 @@ args = ["/path/to/slidev-mcp/dist/index.js"]
 type = "stdio"
 ```
 
+With Deno:
+
+```toml
+[mcp_servers.slidev-mcp]
+command = "deno"
+args = ["run", "-A", "/path/to/slidev-mcp/dist/index.js"]
+type = "stdio"
+```
+
 ## MCP Tools
 
 | Tool | What it does |
 |---|---|
-| `init_presentation` | Create a Slidev project, scaffold `slides.md`, and install dependencies |
+| `init_presentation` | Create or attach to a Slidev project, with `minimal`, `agent-dark`, or `custom` presets |
 | `add_slide` | Append or insert a slide |
 | `update_slide` | Replace the content of an existing slide |
 | `delete_slide` | Delete a slide, while protecting the last slide |
 | `list_slides` | Inspect slide order, previews, and frontmatter |
+| `get_project_info` | Inspect active project paths, theme, package versions, slide count, and verification status |
 | `set_theme` | Change the Slidev theme and optionally install the theme package |
 | `set_style` | Apply global CSS, per-slide style blocks, or UnoCSS classes |
 | `set_slide_transition` | Configure transitions, `v-click` reveals, and `v-motion` animations |
 | `add_diagram` | Insert Mermaid diagrams |
-| `export_presentation` | Export to PDF, PNG, or a static SPA build |
-| `verify_presentation` | Validate `slides.md` and flag common rendering issues |
+| `export_presentation` | Export to PDF, PNG, or a static SPA build with custom output, timeout, dry-run, and syntax preflight |
+| `verify_presentation` | Validate `slides.md`; `render` and `full` levels also run a Slidev build check |
+| `repair_presentation` | Safely normalize `slides.md` structure, removing BOM/leading whitespace and canonicalizing separators |
+
+### `init_presentation` presets
+
+- `agent-dark` (default): preserves the v1.0 behavior with the opinionated dark style, bundled Vue components, default theme, and starter slides.
+- `minimal`: creates a small standard Slidev project with `slides.md` and `package.json` only.
+- `custom`: currently uses the agent-ready scaffold while allowing callers to override theme and skip dependency installation.
+
+`init_presentation` also supports `install_dependencies: false` and `overwrite: true`. Existing directories are never replaced unless `overwrite` is explicitly set.
 
 If behavior differs between documentation and code, treat `src/tools/*.ts` as the source of truth.
 
@@ -207,6 +262,8 @@ If behavior differs between documentation and code, treat `src/tools/*.ts` as th
 npm install
 npm run build
 npm run typecheck
+npm test
+npm run check
 node dist/index.js
 ```
 
